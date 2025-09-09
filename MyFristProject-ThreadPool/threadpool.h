@@ -11,6 +11,7 @@
 #include <functional>
 #include<thread>
 #include <iostream>
+#include <unordered_map>
 enum class PoolMode
 {
 	MODE_FIXED,     //固定模式，
@@ -22,12 +23,15 @@ enum class PoolMode
 class Thread
 {
 public:
-	using ThreadFunc = std::function<void()>;
+	using ThreadFunc = std::function<void(int)>;
 	Thread(ThreadFunc func);//构造函数
 	~Thread();//析构函数
-	void start();
+	void start();   //创建一个std::thread
+	int getThreadId() const;//获取线程id
 private:
+	static int generateId_;
 	ThreadFunc func_;
+	int threadId_;
 };
 
 class Any
@@ -36,6 +40,8 @@ public:
 	Any(const Any&) = delete;      //unique不能有拷贝构造
 	Any& operator=(const Any&) = delete;
 	Any() = default;
+	Any(Any&& ) = default;
+	Any& operator=(Any&&) = default;
 
 	template<typename T>
 	Any(T date)
@@ -60,7 +66,7 @@ private:
 		~Derive() = default;
 		T date_;
 	};
-
+public:
 	template<typename T>
 	T castto()
 	{
@@ -81,7 +87,13 @@ class Result;
 class Task
 {
 public:
+	Task();
+	~Task() = default;
 	virtual Any run() = 0;
+	void setVal(Result* res);
+	void exec();
+private:
+	Result* result_;
 };
 
 
@@ -123,7 +135,7 @@ public:
 	~Result() = default;
 
 	//设置线程运行结果
-	void setVal();
+	void setVal(Any);
 
 	Any get();
 private:
@@ -140,12 +152,13 @@ public:
 	ThreadPool();     //线程池构造函数
 	~ThreadPool();     //线程池析构函数
 
-	void start(int initThreadSize=4);//开启线程池
+	void start(int initThreadSize=std::thread::hardware_concurrency());//开启线程池
 
 	void setMode(PoolMode mode);   //设置线程池模式
 
-	void setTaskQueMaxThreshHold(int threshhold);//设置任务队列阈值
+	void setTaskQueMaxThreshHold(int threshhold); //设置任务队列阈值
 
+	void setThreadSizeMaxThreshHold(int threshhold); //设置最大线程数量
 	Result submitTask(std::shared_ptr<Task> sp);   //用户提交任务接口
 
 	//关闭拷贝构造函数
@@ -153,10 +166,14 @@ public:
 	ThreadPool& operator=(const ThreadPool&) = delete;
 private:
 	//定义线程函数
-	void threadFunc();
+	void threadFunc(int threadid);
+	bool checkRunningState() const;   //判断线程池的状态，内部函数，不提供外部接口
 private:
-	std::vector<std::unique_ptr<Thread>> threads_;  //线程列表
+	std::unordered_map<int, std::unique_ptr<Thread>> threads_;  //线程列表
 	int initThreadSize_;  //初始线程数量
+	std::atomic_int idleThreadSize_; //空闲线程数量
+	int threadSizeThreshHold_;     //线程数量的上限
+	std::atomic_int curThreadSize_;  //当前线程数量
 
 	std::queue<std::shared_ptr<Task>>  taskQue_; //任务队列
 	std::atomic_int taskSize_;   //任务数量
@@ -167,5 +184,7 @@ private:
 	std::condition_variable notEmpty_; //表示任务队列不空，线程可以消耗任务
 
 	PoolMode poolMode_;   //当前线程池的模式
+	std::atomic_bool isPoolRunning_;//当前线程池状态
+	std::condition_variable poolExit_;
 };
 #endif
